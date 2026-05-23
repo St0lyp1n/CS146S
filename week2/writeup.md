@@ -1,5 +1,7 @@
 # Week 2 Write-up
+
 Tip: To preview this markdown file
+
 - On Mac, press `Command (⌘) + Shift + V`
 - On Windows/Linux, press `Ctrl + Shift + V`
 
@@ -7,45 +9,51 @@ Tip: To preview this markdown file
 
 Fill out all of the `TODO`s in this file.
 
-## SUBMISSION DETAILS
-
-Name: **TODO** \
-SUNet ID: **TODO** \
-Citations: **TODO**
-
-This assignment took me about **TODO** hours to do. 
-
-
 ## YOUR RESPONSES
+
 For each exercise, please include what prompts you used to generate the answer, in addition to the location of the generated response. Make sure to clearly add comments in your code documenting which parts are generated.
 
 ### Exercise 1: Scaffold a New Feature
-Prompt: 
+
+Prompt:
+
+```text
+你是一个python软件开发者。当前文件在项目里用于提取action item
+请分析extract_action_items()这个函数作为参考。
+修改要求：实现基于LLM的提取方式，函数名为extract_action_items_llm()。
+使用Ollama中的模型，避免使用较大模型。
+输出为JSON格式，可以以 https://ollama.com/blog/structured-outputs 这个网站为参考.
+可选模型可参考 https://ollama.com/library。
 ```
-TODO
-``` 
 
 Generated Code Snippets:
-```
-TODO: List all modified code files with the relevant line numbers.
+
+```py
+# TODO: List all modified code files with the relevant line numbers.
+
 ```
 
 ### Exercise 2: Add Unit Tests
-Prompt: 
-```
+
+Prompt:
+
+```text
 TODO
-``` 
+```
 
 Generated Code Snippets:
-```
-TODO: List all modified code files with the relevant line numbers.
+
+```py
+# TODO: List all modified code files with the relevant line numbers.
 ```
 
 ### Exercise 3: Refactor Existing Code for Clarity
-Prompt: 
-```
+
+Prompt:
+
+```text
 TODO
-``` 
+```
 
 Generated/Modified Code Snippets:
 ```

@@ -3,12 +3,30 @@ from __future__ import annotations
 import os
 import re
 from typing import List
-import json
-from typing import Any
-from ollama import chat
+
 from dotenv import load_dotenv
+from ollama import Client
+from pydantic import BaseModel, Field
 
 load_dotenv()
+
+# Small, efficient model suitable for structured extraction (see https://ollama.com/library).
+DEFAULT_OLLAMA_MODEL = "llama3.2:3b"
+DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+
+# trust_env=False avoids routing local requests through a system HTTP proxy (502 on Windows).
+_ollama_client = Client(
+    host=os.getenv("OLLAMA_HOST", DEFAULT_OLLAMA_HOST),
+    trust_env=False,
+)
+
+
+class ActionItemsResponse(BaseModel):
+    """JSON schema for Ollama structured output: array of action item strings."""
+
+    action_items: list[str] = Field(
+        description="Action items extracted from the notes, without bullet markers or checkboxes."
+    )
 
 BULLET_PREFIX_PATTERN = re.compile(r"^\s*([-*•]|\d+\.)\s+")
 KEYWORD_PREFIXES = (
@@ -87,3 +105,49 @@ def _looks_imperative(sentence: str) -> bool:
         "investigate",
     }
     return first.lower() in imperative_starters
+
+
+def extract_action_items_llm(text: str) -> List[str]:
+    """Extract action items from free-form notes using an Ollama LLM with structured JSON output."""
+    stripped = text.strip()
+    if not stripped:
+        return []
+
+    model = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
+
+    response = _ollama_client.chat(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You extract actionable tasks from meeting notes and to-do lists. "
+                    "Return each item as a concise imperative phrase. "
+                    "Ignore narrative text that is not an action item. "
+                    "Return as JSON."
+                ),
+            },
+            {
+                "role": "user",
+                "content": stripped,
+            },
+        ],
+        format=ActionItemsResponse.model_json_schema(),
+        options={"temperature": 0},
+    )
+
+    parsed = ActionItemsResponse.model_validate_json(response.message.content)
+
+    # Deduplicate while preserving order (same behavior as extract_action_items).
+    seen: set[str] = set()
+    unique: List[str] = []
+    for item in parsed.action_items:
+        cleaned = item.strip()
+        if not cleaned:
+            continue
+        lowered = cleaned.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        unique.append(cleaned)
+    return unique
