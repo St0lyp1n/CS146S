@@ -218,14 +218,384 @@ Generated Code Snippets:
 Prompt:
 
 ```text
-TODO
+你是一名python软件开发者。
+请重构后端的代码, 特别侧重于定义明确的 API 契约/架构、数据库层清理、应用生命周期/配置，以及错误处理。
+要求保证代码清晰整洁。
 ```
 
 Generated/Modified Code Snippets:
-```
-TODO: List all modified code files with the relevant line numbers. (We anticipate there may be multiple scattered changes here – just produce as comprehensive of a list as you can.)
-```
 
+```git
+diff --git a/week2/app/db.py b/week2/app/db.py
+deleted file mode 100644
+index 40f2385..0000000
+--- a/week2/app/db.py
++++ /dev/null
+@@ -1,116 +0,0 @@
+-from __future__ import annotations
+-
+-import sqlite3
+-from pathlib import Path
+-from typing import Optional
+-
+-
+--- a/week2/app/db.py
++++ /dev/null
+@@ -1,116 +0,0 @@
+-from __future__ import annotations
+-
+-import sqlite3
+-from pathlib import Path
+-from typing import Optional
+-
+-
+-BASE_DIR = Path(__file__).resolve().parents[1]
+-DATA_DIR = BASE_DIR / "data"
+-DB_PATH = DATA_DIR / "app.db"
+-
+-
+-def ensure_data_directory_exists() -> None:
+-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+-
+-
+-def get_connection() -> sqlite3.Connection:
+-    ensure_data_directory_exists()
+-    connection = sqlite3.connect(DB_PATH)
+-    connection.row_factory = sqlite3.Row
+-    return connection
+-
+-
+-def init_db() -> None:
+-    ensure_data_directory_exists()
+-    with get_connection() as connection:
+-        cursor = connection.cursor()
+-        cursor.execute(
+-            """
+-            CREATE TABLE IF NOT EXISTS notes (
+-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+-                content TEXT NOT NULL,
+-                created_at TEXT DEFAULT (datetime('now'))
+-            );
+-            """
+-        )
+-        cursor.execute(
+-            """
+-            CREATE TABLE IF NOT EXISTS action_items (
+-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+-                note_id INTEGER,
+-                text TEXT NOT NULL,
+-                done INTEGER DEFAULT 0,
+-                created_at TEXT DEFAULT (datetime('now')),
+-                FOREIGN KEY (note_id) REFERENCES notes(id)
+-            );
+-            """
+-        )
+-        connection.commit()
+-
+-
+-def insert_note(content: str) -> int:
+-    with get_connection() as connection:
+-        cursor = connection.cursor()
+-        cursor.execute("INSERT INTO notes (content) VALUES (?)", (content,))
+-        connection.commit()
+-        return int(cursor.lastrowid)
+-
+-
+-def list_notes() -> list[sqlite3.Row]:
+-    with get_connection() as connection:
+-        cursor = connection.cursor()
+-        cursor.execute("SELECT id, content, created_at FROM notes ORDER BY id DESC")
+-        return list(cursor.fetchall())
+-
+-
+-def get_note(note_id: int) -> Optional[sqlite3.Row]:
+-    with get_connection() as connection:
+-        cursor = connection.cursor()
+-        cursor.execute(
+-            "SELECT id, content, created_at FROM notes WHERE id = ?",
+-            (note_id,),
+-        )
+-        row = cursor.fetchone()
+-        return row
+-
+-
+-def insert_action_items(items: list[str], note_id: Optional[int] = None) -> list[int]:
+-    with get_connection() as connection:
+-        cursor = connection.cursor()
+-        ids: list[int] = []
+-        for item in items:
+-            cursor.execute(
+-                "INSERT INTO action_items (note_id, text) VALUES (?, ?)",
+-                (note_id, item),
+-            )
+-            ids.append(int(cursor.lastrowid))
+-        connection.commit()
+-        return ids
+-
+-
+-def list_action_items(note_id: Optional[int] = None) -> list[sqlite3.Row]:
+-    with get_connection() as connection:
+-        cursor = connection.cursor()
+-        if note_id is None:
+-            cursor.execute(
+-                "SELECT id, note_id, text, done, created_at FROM action_items ORDER BY id DESC"
+-            )
+-        else:
+-            cursor.execute(
+-                "SELECT id, note_id, text, done, created_at FROM action_items WHERE note_id = ? ORDER BY id DESC",
+-                (note_id,),
+-            )
+-        return list(cursor.fetchall())
+-
+-
+-def mark_action_item_done(action_item_id: int, done: bool) -> None:
+-    with get_connection() as connection:
+-        cursor = connection.cursor()
+-        cursor.execute(
+-            "UPDATE action_items SET done = ? WHERE id = ?",
+-            (1 if done else 0, action_item_id),
+-        )
+-        connection.commit()
+-
+-
+diff --git a/week2/app/main.py b/week2/app/main.py
+index 6a3315e..3e23b41 100644
+--- a/week2/app/main.py
++++ b/week2/app/main.py
+@@ -1,30 +1,73 @@
+ from __future__ import annotations
+
+-from pathlib import Path
+-from typing import Any, Dict, Optional
++from contextlib import asynccontextmanager
++from typing import AsyncIterator
+
+-from fastapi import FastAPI, HTTPException
+-from fastapi.responses import HTMLResponse
++from fastapi import FastAPI, Request
++from fastapi.exceptions import RequestValidationError
++from fastapi.responses import HTMLResponse, JSONResponse
+ from fastapi.staticfiles import StaticFiles
+
+-from .db import init_db
++from .config import get_settings
++from .database import init_db
++from .exceptions import AppError, NotFoundError, ValidationError
+ from .routers import action_items, notes
+-from . import db
++from .schemas import ErrorResponse
+
+-init_db()
+
+-app = FastAPI(title="Action Item Extractor")
++@asynccontextmanager
++async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
++    init_db()
++    yield
++
++
++app = FastAPI(title="Action Item Extractor", lifespan=lifespan)
++
++
++@app.exception_handler(NotFoundError)
++async def not_found_handler(_request: Request, exc: NotFoundError) -> JSONResponse:
++    return JSONResponse(
++        status_code=404,
++        content=ErrorResponse(detail=str(exc)).model_dump(),
++    )
++
++
++@app.exception_handler(ValidationError)
++async def validation_error_handler(_request: Request, exc: ValidationError) -> JSONResponse:
++    return JSONResponse(
++        status_code=400,
++        content=ErrorResponse(detail=str(exc)).model_dump(),
++    )
++
++
++@app.exception_handler(AppError)
++async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
++    return JSONResponse(
++        status_code=500,
++        content=ErrorResponse(detail=str(exc)).model_dump(),
++    )
++
++
++@app.exception_handler(RequestValidationError)
++async def request_validation_handler(
++    _request: Request, exc: RequestValidationError
++) -> JSONResponse:
++    errors = exc.errors()
++    detail = errors[0]["msg"] if errors else "Invalid request."
++    return JSONResponse(
++        status_code=422,
++        content=ErrorResponse(detail=detail).model_dump(),
++    )
+
+
+ @app.get("/", response_class=HTMLResponse)
+ def index() -> str:
+-    html_path = Path(__file__).resolve().parents[1] / "frontend" / "index.html"
+-    return html_path.read_text(encoding="utf-8")
++    settings = get_settings()
++    return (settings.frontend_dir / "index.html").read_text(encoding="utf-8")
+
+
+ app.include_router(notes.router)
+ app.include_router(action_items.router)
+
+-
+-static_dir = Path(__file__).resolve().parents[1] / "frontend"
+-app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+\ No newline at end of file
++settings = get_settings()
++app.mount("/static", StaticFiles(directory=str(settings.frontend_dir)), name="static")
+diff --git a/week2/app/routers/action_items.py b/week2/app/routers/action_items.py
+index 38a03ea..edc2242 100644
+--- a/week2/app/routers/action_items.py
++++ b/week2/app/routers/action_items.py
+@@ -1,50 +1,55 @@
+ from __future__ import annotations
+
+-from typing import Any, Dict, List, Optional
+-
+-from fastapi import APIRouter, HTTPException
+-
+-from .. import db
++from typing import Optional
++
++from fastapi import APIRouter, Query
++
++from ..database import insert_action_items, insert_note, list_action_items, mark_action_item_done
++from ..schemas import (
++    ActionItemDetailResponse,
++    ActionItemResponse,
++    ExtractActionItemsRequest,
++    ExtractActionItemsResponse,
++    MarkActionItemDoneRequest,
++    MarkActionItemDoneResponse,
++)
+ from ..services.extract import extract_action_items
+
+-
+ router = APIRouter(prefix="/action-items", tags=["action-items"])
+
+
+-@router.post("/extract")
+-def extract(payload: Dict[str, Any]) -> Dict[str, Any]:
+-    text = str(payload.get("text", "")).strip()
+-    if not text:
+-        raise HTTPException(status_code=400, detail="text is required")
+-
++@router.post("/extract", response_model=ExtractActionItemsResponse)
++def extract(body: ExtractActionItemsRequest) -> ExtractActionItemsResponse:
++    text = body.text.strip()
+     note_id: Optional[int] = None
+-    if payload.get("save_note"):
+-        note_id = db.insert_note(text)
++    if body.save_note:
++        note = insert_note(text)
++        note_id = note.id
+
+     items = extract_action_items(text)
+-    ids = db.insert_action_items(items, note_id=note_id)
+-    return {"note_id": note_id, "items": [{"id": i, "text": t} for i, t in zip(ids, items)]}
++    saved = insert_action_items(items, note_id=note_id)
++    return ExtractActionItemsResponse(
++        note_id=note_id,
++        items=[ActionItemResponse(id=item.id, text=item.text) for item in saved],
++    )
+
+
+-@router.get("")
+-def list_all(note_id: Optional[int] = None) -> List[Dict[str, Any]]:
+-    rows = db.list_action_items(note_id=note_id)
++@router.get("", response_model=list[ActionItemDetailResponse])
++def list_all(note_id: Optional[int] = Query(default=None)) -> list[ActionItemDetailResponse]:
++    rows = list_action_items(note_id=note_id)
+     return [
+-        {
+-            "id": r["id"],
+-            "note_id": r["note_id"],
+-            "text": r["text"],
+-            "done": bool(r["done"]),
+-            "created_at": r["created_at"],
+-        }
+-        for r in rows
++        ActionItemDetailResponse(
++            id=row.id,
++            note_id=row.note_id,
++            text=row.text,
++            done=row.done,
++            created_at=row.created_at,
++        )
++        for row in rows
+     ]
+
+
+-@router.post("/{action_item_id}/done")
+-def mark_done(action_item_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+-    done = bool(payload.get("done", True))
+-    db.mark_action_item_done(action_item_id, done)
+-    return {"id": action_item_id, "done": done}
+-
+-
++@router.post("/{action_item_id}/done", response_model=MarkActionItemDoneResponse)
++def mark_done(action_item_id: int, body: MarkActionItemDoneRequest) -> MarkActionItemDoneResponse:
++    updated = mark_action_item_done(action_item_id, body.done)
++    return MarkActionItemDoneResponse(id=updated.id, done=updated.done)
+diff --git a/week2/app/routers/notes.py b/week2/app/routers/notes.py
+index 292c754..95fd71b 100644
+--- a/week2/app/routers/notes.py
++++ b/week2/app/routers/notes.py
+@@ -1,34 +1,20 @@
+ from __future__ import annotations
+
+-from typing import Any, Dict, List
+-
+-from fastapi import APIRouter, HTTPException
+-
+-from .. import db
++from fastapi import APIRouter
+
++from ..database import insert_note, require_note
++from ..schemas import CreateNoteRequest, NoteResponse
+
+ router = APIRouter(prefix="/notes", tags=["notes"])
+
+
+-@router.post("")
+-def create_note(payload: Dict[str, Any]) -> Dict[str, Any]:
+-    content = str(payload.get("content", "")).strip()
+-    if not content:
+-        raise HTTPException(status_code=400, detail="content is required")
+-    note_id = db.insert_note(content)
+-    note = db.get_note(note_id)
+-    return {
+-        "id": note["id"],
+-        "content": note["content"],
+-        "created_at": note["created_at"],
+-    }
+-
+-
+-@router.get("/{note_id}")
+-def get_single_note(note_id: int) -> Dict[str, Any]:
+-    row = db.get_note(note_id)
+-    if row is None:
+-        raise HTTPException(status_code=404, detail="note not found")
+-    return {"id": row["id"], "content": row["content"], "created_at": row["created_at"]}
++@router.post("", response_model=NoteResponse, status_code=201)
++def create_note(body: CreateNoteRequest) -> NoteResponse:
++    note = insert_note(body.content.strip())
++    return NoteResponse(id=note.id, content=note.content, created_at=note.created_at)
+
+
++@router.get("/{note_id}", response_model=NoteResponse)
++def get_single_note(note_id: int) -> NoteResponse:
++    note = require_note(note_id)
++    return NoteResponse(id=note.id, content=note.content, created_at=note.created_at)
+
+```
 
 ### Exercise 4: Use Agentic Mode to Automate a Small Task
 Prompt: 

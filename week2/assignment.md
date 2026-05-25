@@ -19,17 +19,21 @@ Follow these instructions to set up Cursor and open your project:
 4. Open a new terminal window, navigate to your project root, and run: `cursor .`
 
 ### Current Application
-Here's how you can start running the current starter application: 
+
+Here's how you can start running the current starter application:
+
 1. Activate your conda environment.
-```
+
+```cmd
 conda activate cs146s 
 ```
-2. From the project root, run the server:
+
+1. From the project root, run the server:
 ```
 poetry run uvicorn week2.app.main:app --reload
 ```
-3. Open a web browser and navigate to http://127.0.0.1:8000/.
-4. Familiarize yourself with the current state of the application. Make sure you can successfully input notes and produce the extracted action item checklist. 
+1. Open a web browser and navigate to http://127.0.0.1:8000/.
+2. Familiarize yourself with the current state of the application. Make sure you can successfully input notes and produce the extracted action item checklist.
 
 ## Exercises
 For each exercise, use Cursor to help you implement the specified improvements to the current action item extractor application.
@@ -43,7 +47,8 @@ Analyze the existing `extract_action_items()` function in `week2/app/services/ex
 Your task is to implement an **LLM-powered** alternative, `extract_action_items_llm()`, that utilizes Ollama to perform action item extraction via a large language model.
 
 Some  tips:
-- To produce structured outputs (i.e. JSON array of strings), refer to this documentation: https://ollama.com/blog/structured-outputs 
+
+- To produce structured outputs (i.e. JSON array of strings), refer to this documentation: https://ollama.com/blog/structured-outputs
 - To browse available Ollama models, refer to this documentation: https://ollama.com/library. Note that larger models will be more resource-intensive, so start small. To pull and run a model: `ollama run {MODEL_NAME}`
 
 ### TODO 2: Add Unit Tests 
@@ -52,7 +57,7 @@ Write unit tests for `extract_action_items_llm()` covering multiple inputs (e.g.
 
 ### TODO 3: Refactor Existing Code for Clarity
 
-Perform a refactor of the code in the backend, focusing in particular on well-defined API contracts/schemas, database layer cleanup, app lifecycle/configuration, error handling. 
+Perform a refactor of the code in the backend, focusing in particular on well-defined API contracts/schemas, database layer cleanup, app lifecycle/configuration, error handling.
 
 ### TODO 4: Use Agentic Mode to Automate Small Tasks
 
@@ -66,13 +71,16 @@ Perform a refactor of the code in the backend, focusing in particular on well-de
 *Students learn how AI can introspect a codebase and produce documentation automatically, showcasing Cursor’s ability to parse code context and translate it into human‑readable form.*
 
 Use Cursor to analyze the current codebase and generate a well-structured `README.md` file. The README should include, at a minimum:
+
 - A brief overview of the project
 - How to set up and run the project
 - API endpoints and functionality
 - Instructions for running the test suite
 
 ## Deliverables
-Fill out `week2/writeup.md` according to the instructions provided. Make sure all your changes are documented in your codebase. 
+
+Fill out `week2/writeup.md` according to the instructions provided. Make sure all your changes are documented in your codebase.
 
 ## Evaluation rubric (100 pts total)
+
 - 20 points per part 1-5 (10 for the generated code and 10 for each prompt).
