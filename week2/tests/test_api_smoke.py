@@ -1,6 +1,8 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from week2.app.main import app
+from week2.tests.test_extract import _ollama_available
 
 client = TestClient(app)
 
@@ -33,3 +35,30 @@ def test_create_and_get_note():
 def test_extract_rejects_blank_text():
     response = client.post("/action-items/extract", json={"text": "   "})
     assert response.status_code == 422
+
+
+@pytest.mark.skipif(
+    not _ollama_available(),
+    reason="Ollama is not running; start it or set OLLAMA_HOST",
+)
+def test_extract_llm_endpoint():
+    response = client.post(
+        "/action-items/extract-llm",
+        json={"text": "- [ ] Deploy staging", "save_note": False},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["items"]) >= 1
+
+
+def test_list_notes():
+    client.post("/notes", json={"content": "first note"})
+    client.post("/notes", json={"content": "second note"})
+
+    response = client.get("/notes")
+    assert response.status_code == 200
+    notes = response.json()
+    assert len(notes) >= 2
+    contents = {note["content"] for note in notes}
+    assert "first note" in contents
+    assert "second note" in contents

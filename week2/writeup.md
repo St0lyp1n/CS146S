@@ -598,30 +598,313 @@ index 292c754..95fd71b 100644
 ```
 
 ### Exercise 4: Use Agentic Mode to Automate a Small Task
-Prompt: 
+
+Prompt:
+
+```text
+你是一名python软件开发者。
+接下来，将LLM驱动的提取器集成到软件上作为新的endpoint。
+更新前端文件使页面多出一个"Extract LLM"的按钮，按下它可以调用LLM驱动的endpoint。
+同时暴露一个endpoint用来取回所有notes。
+更新前端文件是页面多出一个“List Notes”按钮，按下它可以取回所有notes并且在页面上展现它们
 ```
-TODO
-``` 
 
 Generated Code Snippets:
-```
-TODO: List all modified code files with the relevant line numbers.
-```
 
+```git
+diff --git a/week2/app/routers/action_items.py b/week2/app/routers/action_items.py
+index edc2242..b967abd 100644
+--- a/week2/app/routers/action_items.py
++++ b/week2/app/routers/action_items.py
+@@ -2,7 +2,8 @@ from __future__ import annotations
+
+ from typing import Optional
+
+-from fastapi import APIRouter, Query
++from fastapi import APIRouter, HTTPException, Query
++from ollama import ResponseError
+
+ from ..database import insert_action_items, insert_note, list_action_items, mark_action_item_done
+ from ..schemas import (
+@@ -13,7 +14,7 @@ from ..schemas import (
+     MarkActionItemDoneRequest,
+     MarkActionItemDoneResponse,
+ )
+-from ..services.extract import extract_action_items
++from ..services.extract import extract_action_items, extract_action_items_llm
+
+ router = APIRouter(prefix="/action-items", tags=["action-items"])
+
+@@ -34,6 +35,29 @@ def extract(body: ExtractActionItemsRequest) -> ExtractActionItemsResponse:
+     )
+
+
++@router.post("/extract-llm", response_model=ExtractActionItemsResponse)
++def extract_llm(body: ExtractActionItemsRequest) -> ExtractActionItemsResponse:
++    text = body.text.strip()
++    note_id: Optional[int] = None
++    if body.save_note:
++        note = insert_note(text)
++        note_id = note.id
++
++    try:
++        items = extract_action_items_llm(text)
++    except ResponseError as exc:
++        raise HTTPException(
++            status_code=503,
++            detail="Ollama is unavailable. Ensure Ollama is running and the model is pulled.",
++        ) from exc
++
++    saved = insert_action_items(items, note_id=note_id)
++    return ExtractActionItemsResponse(
++        note_id=note_id,
++        items=[ActionItemResponse(id=item.id, text=item.text) for item in saved],
++    )
++
++
+ @router.get("", response_model=list[ActionItemDetailResponse])
+ def list_all(note_id: Optional[int] = Query(default=None)) -> list[ActionItemDetailResponse]:
+     rows = list_action_items(note_id=note_id)
+diff --git a/week2/app/routers/notes.py b/week2/app/routers/notes.py
+index 95fd71b..de1ea7a 100644
+--- a/week2/app/routers/notes.py
++++ b/week2/app/routers/notes.py
+@@ -2,12 +2,20 @@ from __future__ import annotations
+
+ from fastapi import APIRouter
+
+-from ..database import insert_note, require_note
++from ..database import insert_note, list_notes, require_note
+ from ..schemas import CreateNoteRequest, NoteResponse
+
+ router = APIRouter(prefix="/notes", tags=["notes"])
+
+
++@router.get("", response_model=list[NoteResponse])
++def list_all_notes() -> list[NoteResponse]:
++    return [
++        NoteResponse(id=note.id, content=note.content, created_at=note.created_at)
++        for note in list_notes()
++    ]
++
++
+ @router.post("", response_model=NoteResponse, status_code=201)
+ def create_note(body: CreateNoteRequest) -> NoteResponse:
+     note = insert_note(body.content.strip())
+diff --git a/week2/frontend/index.html b/week2/frontend/index.html
+index 1ace101..8292af4 100644
+--- a/week2/frontend/index.html
++++ b/week2/frontend/index.html
+@@ -7,12 +7,16 @@
+     <style>
+       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 2rem auto; max-width: 800px; padding: 0 1rem; }
+       h1 { font-size: 1.5rem; }
++      h2 { font-size: 1.125rem; margin-top: 1.5rem; }
+       textarea { width: 100%; min-height: 160px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace; }
+       button { padding: 0.5rem 1rem; }
+-      .items { margin-top: 1rem; }
++      .items, .notes { margin-top: 1rem; }
+       .item { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; }
++      .note { border: 1px solid #e5e7eb; border-radius: 0.375rem; padding: 0.75rem; margin-bottom: 0.75rem; }
++      .note-meta { color: #6b7280; font-size: 0.875rem; margin-bottom: 0.5rem; }
++      .note-content { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace; font-size: 0.875rem; }
+       .muted { color: #6b7280; font-size: 0.875rem; }
+-      .row { display: flex; gap: 0.5rem; align-items: center; }
++      .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+     </style>
+   </head>
+   <body>
+@@ -24,51 +28,104 @@
+     <div class="row">
+       <label class="row"><input id="save_note" type="checkbox" checked /> Save as note</label>
+       <button id="extract">Extract</button>
++      <button id="extract-llm">Extract LLM</button>
++      <button id="list-notes" type="button">List Notes</button>
+     </div>
+
+     <div class="items" id="items"></div>
+
++    <h2>Saved Notes</h2>
++    <div class="notes" id="notes">
++      <p class="muted">Click "List Notes" to load saved notes.</p>
++    </div>
++
+     <script>
+       const $ = (sel) => document.querySelector(sel);
+       const itemsEl = $('#items');
+-      const btn = $('#extract');
+-      btn.addEventListener('click', async () => {
++      const notesEl = $('#notes');
++
++      function escapeHtml(text) {
++        return text
++          .replace(/&/g, '&amp;')
++          .replace(/</g, '&lt;')
++          .replace(/>/g, '&gt;')
++          .replace(/"/g, '&quot;');
++      }
++
++      function renderActionItems(items) {
++        if (!items || items.length === 0) {
++          itemsEl.innerHTML = '<p class="muted">No action items found.</p>';
++          return;
++        }
++        itemsEl.innerHTML = items.map((it) => (
++          `<div class="item"><input type="checkbox" data-id="${it.id}" /> <span>${escapeHtml(it.text)}</span></div>`
++        )).join('');
++        itemsEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
++          cb.addEventListener('change', async (e) => {
++            const id = e.target.getAttribute('data-id');
++            await fetch(`/action-items/${id}/done`, {
++              method: 'POST',
++              headers: { 'Content-Type': 'application/json' },
++              body: JSON.stringify({ done: e.target.checked }),
++            });
++          });
++        });
++      }
++
++      async function runExtract(endpoint, loadingMessage) {
+         const text = $('#text').value;
+         const save = $('#save_note').checked;
+-        itemsEl.textContent = 'Extracting...';
++        itemsEl.textContent = loadingMessage;
+         try {
+-          const res = await fetch('/action-items/extract', {
++          const res = await fetch(endpoint, {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ text, save_note: save }),
+           });
+-          if (!res.ok) throw new Error('Request failed');
++          if (!res.ok) {
++            const err = await res.json().catch(() => ({}));
++            throw new Error(err.detail || 'Request failed');
++          }
+           const data = await res.json();
+-          if (!data.items || data.items.length === 0) {
+-            itemsEl.innerHTML = '<p class="muted">No action items found.</p>';
++          renderActionItems(data.items);
++        } catch (err) {
++          console.error(err);
++          itemsEl.textContent = err.message || 'Error extracting items';
++        }
++      }
++
++      $('#extract').addEventListener('click', () => {
++        runExtract('/action-items/extract', 'Extracting...');
++      });
++
++      $('#extract-llm').addEventListener('click', () => {
++        runExtract('/action-items/extract-llm', 'Extracting with LLM...');
++      });
++
++      $('#list-notes').addEventListener('click', async () => {
++        notesEl.textContent = 'Loading notes...';
++        try {
++          const res = await fetch('/notes');
++          if (!res.ok) {
++            const err = await res.json().catch(() => ({}));
++            throw new Error(err.detail || 'Request failed');
++          }
++          const notes = await res.json();
++          if (!notes.length) {
++            notesEl.innerHTML = '<p class="muted">No notes saved yet.</p>';
+             return;
+           }
+-          itemsEl.innerHTML = data.items.map(it => (
+-            `<div class="item"><input type="checkbox" data-id="${it.id}" /> <span>${it.text}</span></div>`
++          notesEl.innerHTML = notes.map((note) => (
++            `<article class="note">
++              <div class="note-meta">#${note.id} · ${escapeHtml(note.created_at)}</div>
++              <div class="note-content">${escapeHtml(note.content)}</div>
++            </article>`
+           )).join('');
+-          itemsEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+-            cb.addEventListener('change', async (e) => {
+-              const id = e.target.getAttribute('data-id');
+-              await fetch(`/action-items/${id}/done`, {
+-                method: 'POST',
+-                headers: { 'Content-Type': 'application/json' },
+-                body: JSON.stringify({ done: e.target.checked }),
+-              });
+-            });
+-          });
+         } catch (err) {
+           console.error(err);
+-          itemsEl.textContent = 'Error extracting items';
++          notesEl.textContent = err.message || 'Error loading notes';
+         }
+       });
+-
+     </script>
+   </body>
+   </html>
+-
+-
+diff --git a/week2/tests/test_api_smoke.py b/week2/tests/test_api_smoke.py
+index 8983085..d285a5a 100644
+--- a/week2/tests/test_api_smoke.py
++++ b/week2/tests/test_api_smoke.py
+@@ -1,6 +1,8 @@
++import pytest
+ from fastapi.testclient import TestClient
+
+ from week2.app.main import app
++from week2.tests.test_extract import _ollama_available
+
+ client = TestClient(app)
+
+@@ -33,3 +35,30 @@ def test_create_and_get_note():
+ def test_extract_rejects_blank_text():
+     response = client.post("/action-items/extract", json={"text": "   "})
+     assert response.status_code == 422
++
++
++@pytest.mark.skipif(
++    not _ollama_available(),
++    reason="Ollama is not running; start it or set OLLAMA_HOST",
++)
++def test_extract_llm_endpoint():
++    response = client.post(
++        "/action-items/extract-llm",
++        json={"text": "- [ ] Deploy staging", "save_note": False},
++    )
++    assert response.status_code == 200
++    data = response.json()
++    assert len(data["items"]) >= 1
++
++
++def test_list_notes():
++    client.post("/notes", json={"content": "first note"})
++    client.post("/notes", json={"content": "second note"})
++
++    response = client.get("/notes")
++    assert response.status_code == 200
++    notes = response.json()
++    assert len(notes) >= 2
++    contents = {note["content"] for note in notes}
++    assert "first note" in contents
++    assert "second note" in contents
+
+```
 
 ### Exercise 5: Generate a README from the Codebase
-Prompt: 
-```
+
+Prompt:
+
+```text
 TODO
-``` 
+```
 
 Generated Code Snippets:
-```
+
+```git
 TODO: List all modified code files with the relevant line numbers.
 ```
 
-
 ## SUBMISSION INSTRUCTIONS
-1. Hit a `Command (⌘) + F` (or `Ctrl + F`) to find any remaining `TODO`s in this file. If no results are found, congratulations – you've completed all required fields. 
+
+1. Hit a `Command (⌘) + F` (or `Ctrl + F`) to find any remaining `TODO`s in this file. If no results are found, congratulations – you've completed all required fields.
 2. Make sure you have all changes pushed to your remote repository for grading.
-3. Submit via Gradescope. 
+3. Submit via Gradescope.

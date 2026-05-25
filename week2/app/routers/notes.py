@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ..database import insert_note, require_note
+from ..database import insert_note, list_notes, require_note
 from ..schemas import CreateNoteRequest, NoteResponse
 
 router = APIRouter(prefix="/notes", tags=["notes"])
+
+
+@router.get("", response_model=list[NoteResponse])
+def list_all_notes() -> list[NoteResponse]:
+    return [
+        NoteResponse(id=note.id, content=note.content, created_at=note.created_at)
+        for note in list_notes()
+    ]
 
 
 @router.post("", response_model=NoteResponse, status_code=201)
