@@ -3,6 +3,7 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 
+# 创建一个名为 "weather" 的 FastMCP 实例，这个实例将用于注册和处理与天气相关的工具函数
 mcp = FastMCP("weather")
 
 NWS_API_BASE = "https://api.weather.gov" # 美国国家气象局的API基础URL

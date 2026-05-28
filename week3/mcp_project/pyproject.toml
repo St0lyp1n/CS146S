@@ -7,4 +7,6 @@ requires-python = ">=3.11"
 [tool.uv.workspace]
 members = [
     "weather",
+    "time",
+    "bilibili",
 ]
